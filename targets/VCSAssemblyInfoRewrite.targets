@@ -1,0 +1,139 @@
+<Project>
+  <!-- MSBuildRuntimeType: cond check for omnisharp-vscode support problem -->
+  <Target Condition=" '$(OS)' == 'Windows_NT' AND '$(MSBuildRuntimeType)' == 'Core' " Name="RewriteAssemblyTitle" BeforeTargets="PrepareForBuild">
+    <FindVCSInfoTarget Condition=" '$(VCSInfoTarget)' == '' OR !EXISTS( $(VCSInfoTarget) ) " CurrentDirName="$(ProjectDir)">
+      <Output TaskParameter="DirectoryInParent" PropertyName="VCSInfoTarget" />
+    </FindVCSInfoTarget>
+
+    <PropertyGroup Condition="Exists( $(VCSInfoTarget) ) AND $(VCSInfoTarget.EndsWith('.svn') )">
+      <VCS>Svn</VCS>
+      <TSVNRevExe Condition=" !Exists( $(TSVNRevExe) ) ">C:\Program Files (x86)\TortoiseSVN\bin\subwcrev.exe</TSVNRevExe>
+      <TSVNRevExe Condition=" !Exists( $(TSVNRevExe) ) ">C:\Program Files\TortoiseSVN\bin\subwcrev.exe</TSVNRevExe>
+      <TSVNRevExe Condition=" !Exists( $(TSVNRevExe) ) ">D:\Program Files (x86)\TortoiseSVN\bin\subwcrev.exe</TSVNRevExe>
+      <TSVNRevExe Condition=" !Exists( $(TSVNRevExe) ) ">D:\Program Files\TortoiseSVN\bin\subwcrev.exe</TSVNRevExe>
+      <VCSCommand Condition=" Exists( $(TSVNRevExe) ) ">$(TSVNRevExe)</VCSCommand>
+      <VCSArguments>"$(ProjectDir.TrimEnd('\'))"</VCSArguments>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="Exists( $(VCSInfoTarget) ) AND $(VCSInfoTarget.EndsWith('.git') )">
+      <VCS>Git</VCS>
+      <GitExe Condition=" !Exists( $(GitExe) ) ">C:\Program Files (x86)\Git\bin\git.exe</GitExe>
+      <GitExe Condition=" !Exists( $(GitExe) ) ">C:\Program Files\Git\bin\git.exe</GitExe>
+      <GitExe Condition=" !Exists( $(GitExe) ) ">D:\Program Files (x86)\Git\bin\git.exe</GitExe>
+      <GitExe Condition=" !Exists( $(GitExe) ) ">D:\Program Files\Git\bin\git.exe</GitExe>
+      <VCSCommand Condition=" Exists( $(GitExe) ) ">$(GitExe)</VCSCommand>
+      <VCSArguments>--git-dir="$(VCSInfoTarget)" rev-list --count --first-parent HEAD</VCSArguments>
+      <CapturePattern><![CDATA[(?<revision>\\w+)]]></CapturePattern>
+    </PropertyGroup>
+
+    <Message Text="Read VCS Revision For VCSInfoTarget: '$(VCSInfoTarget)'" Importance="high"/>
+
+    <Exec Condition=" '$(VCSCommand)' != '' " ConsoleToMSBuild="true" StandardOutputImportance="Low" Command="&quot;$(VCSCommand)&quot; $(VCSArguments)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="RawRevision" />
+    </Exec>
+
+    <Exec ConsoleToMSBuild="true" StandardOutputImportance="Low" Command="ECHO %USERNAME%">
+      <Output TaskParameter="ConsoleOutput" PropertyName="UserName" />
+    </Exec>
+
+    <Exec ConsoleToMSBuild="true" StandardOutputImportance="Low" Command="ECHO %COMPUTERNAME%">
+      <Output TaskParameter="ConsoleOutput" PropertyName="BuildComputer" />
+    </Exec>
+
+    <CreateProperty Condition=" '$(Configuration)' == 'Debug' " Value="$(AssemblyName) $(Configuration) build by $(UserName)@$(BuildComputer)">
+      <Output TaskParameter="Value" PropertyName="AssemblyTitle" />
+    </CreateProperty>
+    <CreateProperty Condition=" '$(Configuration)' == 'Release' " Value="$(AssemblyName) by $(UserName)@$(BuildComputer)">
+      <Output TaskParameter="Value" PropertyName="AssemblyTitle" />
+    </CreateProperty>
+    <Message Text="Rewrite AssemblyTitle: '$(AssemblyTitle)'" Importance="high"/>
+
+    <ParseSubwcrev Condition=" '$(VCS)' == 'Svn' AND '$(RawRevision)' != '' " Stdout="$(RawRevision)">
+      <Output TaskParameter="Result" PropertyName="Revision" />
+    </ParseSubwcrev>
+
+    <CreateProperty Condition=" '$(VCS)' == 'Git' AND '$(RawRevision)' != '' " Value="$([System.Text.RegularExpressions.Regex]::Replace($(RawRevision), $(CapturePattern), '${revision}'))">
+      <Output TaskParameter="Value" PropertyName="Revision" />
+    </CreateProperty>
+
+    <CreateProperty Condition=" '$(Revision)' != '' " Value="$([System.Text.RegularExpressions.Regex]::Replace($(Revision), '\D', ''))">
+      <Output TaskParameter="Value" PropertyName="RevisionCode" />
+    </CreateProperty>
+
+    <CreateProperty Condition=" '$(Revision)' != '' " Value="$([System.Text.RegularExpressions.Regex]::Replace($(Revision), '\d', ''))">
+      <Output TaskParameter="Value" PropertyName="RevisionModSymbols" />
+    </CreateProperty>
+
+    <CreateProperty Condition=" '$(RevisionModSymbols)' != '' " Value="$(RevisionModSymbols.Length)">
+      <Output TaskParameter="Value" PropertyName="RevisionModCode" />
+    </CreateProperty>
+
+    <CreateProperty Condition=" '$(RevisionModSymbols)' == '' " Value="0">
+      <Output TaskParameter="Value" PropertyName="RevisionModCode" />
+    </CreateProperty>
+
+    <CreateProperty Condition=" '$(RevisionCode)' != '' " Value="$([System.DateTime]::UtcNow.ToString('yy.Mdd')).$(RevisionCode).$(RevisionModCode)">
+      <Output TaskParameter="Value" PropertyName="Version" />
+    </CreateProperty>
+    <Message Text="Rewrite Version: '$(Version)'" Importance="high"/>
+  </Target>
+
+  <UsingTask
+      TaskName="FindVCSInfoTarget"
+      TaskFactory="RoslynCodeTaskFactory"
+      AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <CurrentDirName ParameterType="System.String" Required="true" />
+      <DirectoryInParent ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+while (true)
+{
+    var gitPath = Path.Combine(CurrentDirName, ".git");
+    if (Directory.Exists(gitPath))
+    {
+        DirectoryInParent = gitPath;
+        break;
+    }
+    var svnPath = Path.Combine(CurrentDirName, ".svn");
+    if (Directory.Exists(svnPath))
+    {
+        DirectoryInParent = svnPath;
+        break;
+    }
+    if (CurrentDirName == Directory.GetDirectoryRoot(CurrentDirName))
+    {
+        DirectoryInParent = string.Empty;
+        break;
+    }
+    CurrentDirName = Directory.GetParent(CurrentDirName).FullName;
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask
+      TaskName="ParseSubwcrev"
+      TaskFactory="RoslynCodeTaskFactory"
+      AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Stdout ParameterType="System.String" Required="true" />
+      <Result ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+var pattern = @".+Last\scommitted\sat\srevision\s(?<revision>\d+).*";
+var result = Regex.Replace(Stdout, pattern, "${revision}", RegexOptions.Singleline);
+if (Stdout.Contains("Local modifications found")) result += "M";
+if (Stdout.Contains("Unversioned items found")) result += "U";
+Result = result;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+</Project>
